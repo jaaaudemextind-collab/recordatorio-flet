@@ -1,0 +1,15 @@
+{
+    "materias": [
+        "Cloud computing"
+    ],
+    "entregas": [
+        {
+            "materia": "Cloud computing",
+            "actividad": "Actividad 4",
+            "fecha": "26/03 23:59",
+            "prio": "Media"
+        }
+    ],
+    "completadas_count": 2,
+    "historial_completadas": {}
+}
