@@ -3,6 +3,7 @@ import json
 import os
 import re
 import asyncio
+import pytz # <-- Librería para control de zonas horarias
 from datetime import datetime
 
 DB_FILE = "datos_academia.json"
@@ -62,7 +63,6 @@ def main(page: ft.Page):
     def filtrar_por_materia(materia_nombre):
         filtro_activo["tipo"] = "materia"
         filtro_activo["valor"] = materia_nombre
-        sb_filtros.selected = {"materia_btn"} 
         renderizar_tareas()
 
     def actualizar_dashboard():
@@ -82,11 +82,19 @@ def main(page: ft.Page):
 
     def obtener_tiempo_restante(fecha_str):
         try:
-            anio_actual = datetime.now().year
+            # Sincronización con la zona horaria de México
+            mexico_tz = pytz.timezone('America/Mexico_City')
+            ahora = datetime.now(mexico_tz)
+            
+            anio_actual = ahora.year
             fecha_meta = datetime.strptime(f"{fecha_str} {anio_actual}", "%d/%m %H:%M %Y")
-            ahora = datetime.now()
+            
+            # Hacer que la fecha meta sea consciente de la zona horaria (CDMX)
+            fecha_meta = mexico_tz.localize(fecha_meta)
+            
             diff = fecha_meta - ahora
             segundos = diff.total_seconds()
+            
             if segundos < 0: return "⚠️ Vencida", "#ef4444", False, segundos
             dias = diff.days
             horas = diff.seconds // 3600
@@ -219,7 +227,7 @@ def main(page: ft.Page):
             content=ft.Column([ft.ListTile(title=ft.Text(mat_item), trailing=ft.IconButton(ft.Icons.DELETE, on_click=lambda _, mi=mat_item: borrar(mi))) for mat_item in state["materias"]], tight=True, scroll=ft.ScrollMode.ALWAYS, height=300), 
             actions=[ft.TextButton("Cerrar", on_click=lambda _: (setattr(dlg, "open", False), page.update()))]
         )
-        page.overlay.append(dlg) # Recomendado en versiones nuevas de Flet
+        page.overlay.append(dlg)
         dlg.open = True
         page.update()
 
@@ -237,7 +245,6 @@ def main(page: ft.Page):
         ft.Row([sb_filtros], alignment=ft.MainAxisAlignment.CENTER),
         ft.Divider(height=10, color="transparent"),
         
-        # SECCIÓN AGREGAR MATERIA (CORREGIDA)
         ft.Row([
             txt_nueva_mat, 
             ft.IconButton(
@@ -259,11 +266,9 @@ def main(page: ft.Page):
         lista_tareas_ui
     )
     
-    # Renderizado inicial
     renderizar_tareas()
     actualizar_progreso()
     actualizar_dashboard()
 
 if __name__ == "__main__":
-    # Inicia como web para Render
     ft.app(target=main)
