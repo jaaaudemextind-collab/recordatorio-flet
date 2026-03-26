@@ -13,8 +13,6 @@ def main(page: ft.Page):
     page.theme_mode = ft.ThemeMode.DARK
     page.bgcolor = "#0f172a" 
     page.padding = 20
-    page.window.width = 450
-    page.window.height = 850
     page.scroll = ft.ScrollMode.ADAPTIVE
 
     filtro_activo = {"tipo": "todos", "valor": None}
@@ -25,6 +23,7 @@ def main(page: ft.Page):
                 with open(DB_FILE, "r", encoding="utf-8") as f:
                     data = json.load(f)
                     if "historial_completadas" not in data: data["historial_completadas"] = {}
+                    if "materias" not in data: data["materias"] = ["Cloud computing", "Base de Datos", "Backend Python"]
                     return data
             except: pass
         return {"materias": ["Cloud computing", "Base de Datos", "Backend Python"], 
@@ -42,10 +41,13 @@ def main(page: ft.Page):
     def guardar_y_refrescar():
         with open(DB_FILE, "w", encoding="utf-8") as f:
             json.dump(state, f, indent=4, ensure_ascii=False)
+        
+        # Sincronizar el Dropdown con la lista de materias actual
+        dd_materia.options = [ft.dropdown.Option(m) for m in state["materias"]]
+        
         renderizar_tareas()
         actualizar_progreso()
         actualizar_dashboard()
-        dd_materia.options = [ft.dropdown.Option(m) for m in state["materias"]]
         page.update()
 
     def actualizar_progreso():
@@ -66,7 +68,7 @@ def main(page: ft.Page):
     def actualizar_dashboard():
         dashboard_ui.controls = []
         historial = state.get("historial_completadas", {})
-        for mat_dash, count in historial.items(): # Cambio de nombre para evitar conflictos
+        for mat_dash, count in historial.items():
             if count > 0:
                 dashboard_ui.controls.append(
                     ft.Container(
@@ -106,6 +108,13 @@ def main(page: ft.Page):
         btn_registrar.icon = ft.Icons.EDIT_NOTE
         page.update()
 
+    def completar_tarea(entrega):
+        m = entrega["materia"]
+        state["historial_completadas"][m] = state["historial_completadas"].get(m, 0) + 1
+        state["entregas"].remove(entrega)
+        state["completadas_count"] = state.get("completadas_count", 0) + 1
+        guardar_y_refrescar()
+
     def crear_card_tarea(entrega):
         prio_conf = {"Crítica": "#ef4444", "Media": "#f59e0b", "Baja": "#3b82f6"}
         conf_color = prio_conf.get(entrega.get("prio", "Media"), "#f59e0b")
@@ -116,13 +125,13 @@ def main(page: ft.Page):
                 ft.Container(width=5, bgcolor=conf_color, border_radius=5, height=60),
                 ft.Row([
                     ft.Column([
-                        ft.Text(entrega['materia'], weight="bold", size=14, no_wrap=False),
-                        ft.Text(entrega['actividad'], size=13, color="#94a3b8", no_wrap=False),
+                        ft.Text(entrega['materia'], weight="bold", size=14),
+                        ft.Text(entrega['actividad'], size=13, color="#94a3b8"),
                         ft.Row([
                             ft.Text(f"📅 {entrega['fecha']}", size=11, color="#f8fafc"),
                             ft.Text(txt_tiempo, size=11, weight="bold", color=color_tiempo)
                         ], spacing=10)
-                    ], spacing=2, expand=True), # Expand ayuda a que el texto ocupe su lugar
+                    ], spacing=2, expand=True),
                     ft.Row([
                         ft.IconButton(icon=ft.Icons.EDIT_OUTLINED, icon_size=18, icon_color="#94a3b8", on_click=lambda _: iniciar_edicion(entrega)),
                         ft.IconButton(icon=ft.Icons.CHECK_CIRCLE_OUTLINE_ROUNDED, icon_color="#10b981", on_click=lambda _: completar_tarea(entrega))
@@ -130,27 +139,9 @@ def main(page: ft.Page):
                 ], expand=True, alignment=ft.MainAxisAlignment.SPACE_BETWEEN)
             ], vertical_alignment=ft.CrossAxisAlignment.CENTER),
             bgcolor="#1e293b", border_radius=12, border=ft.border.all(1, "#334155"), 
-            padding=12,
-            animate_opacity=300 if es_urgente else 0
+            padding=12
         )
-
-        if es_urgente:
-            async def blink():
-                while True:
-                    try:
-                        card.opacity = 0.5 if card.opacity == 1 else 1
-                        card.update()
-                        await asyncio.sleep(0.8)
-                    except: break
-            page.run_task(blink)
         return card
-
-    def completar_tarea(entrega):
-        m = entrega["materia"]
-        state["historial_completadas"][m] = state["historial_completadas"].get(m, 0) + 1
-        state["entregas"].remove(entrega)
-        state["completadas_count"] = state.get("completadas_count", 0) + 1
-        guardar_y_refrescar()
 
     def cambiar_filtro(e):
         filtro_activo["tipo"] = list(e.selection)[0]
@@ -176,6 +167,7 @@ def main(page: ft.Page):
         actualizar_dashboard()
         page.update()
 
+    # --- UI COMPONENTS ---
     sb_filtros = ft.SegmentedButton(
         selected={"todos"},
         on_change=cambiar_filtro,
@@ -195,7 +187,9 @@ def main(page: ft.Page):
         if not re.match(r"^\d{2}/\d{2} \d{2}:\d{2}$", txt_fec.value):
             txt_fec.error_text = "Formato: DD/MM HH:MM"; page.update(); return
         if not dd_materia.value or not txt_act.value: return
+        
         nueva_data = {"materia": dd_materia.value, "actividad": txt_act.value, "fecha": txt_fec.value, "prio": dd_prio.value}
+        
         if tarea_editando["ref"]:
             idx = state["entregas"].index(tarea_editando["ref"])
             state["entregas"][idx] = nueva_data
@@ -203,6 +197,7 @@ def main(page: ft.Page):
             btn_registrar.text = "Guardar"; btn_registrar.bgcolor = "#f59e0b"; btn_registrar.icon = ft.Icons.PLAYLIST_ADD_ROUNDED
         else:
             state["entregas"].append(nueva_data)
+            
         txt_act.value = ""; txt_fec.value = ""; txt_fec.error_text = None
         guardar_y_refrescar()
 
@@ -213,18 +208,22 @@ def main(page: ft.Page):
             state["materias"].remove(m_nombre)
             state["entregas"] = [t for t in state["entregas"] if t["materia"] != m_nombre]
             guardar_y_refrescar()
-            # Corrección del error "mat is not defined" aquí:
+            actualizar_dlg_content()
+        
+        def actualizar_dlg_content():
             dlg.content.controls = [ft.ListTile(title=ft.Text(mat_item), trailing=ft.IconButton(ft.Icons.DELETE, on_click=lambda _, mi=mat_item: borrar(mi))) for mat_item in state["materias"]]
             page.update()
-        
-        # Corrección del error "mat is not defined" aquí también:
+
         dlg = ft.AlertDialog(
-            title=ft.Text("Materias"), 
-            content=ft.Column([ft.ListTile(title=ft.Text(mat_item), trailing=ft.IconButton(ft.Icons.DELETE, on_click=lambda _, mi=mat_item: borrar(mi))) for mat_item in state["materias"]], tight=True), 
+            title=ft.Text("Materias Registradas"), 
+            content=ft.Column([ft.ListTile(title=ft.Text(mat_item), trailing=ft.IconButton(ft.Icons.DELETE, on_click=lambda _, mi=mat_item: borrar(mi))) for mat_item in state["materias"]], tight=True, scroll=ft.ScrollMode.ALWAYS, height=300), 
             actions=[ft.TextButton("Cerrar", on_click=lambda _: (setattr(dlg, "open", False), page.update()))]
         )
-        page.dialog = dlg; dlg.open = True; page.update()
+        page.overlay.append(dlg) # Recomendado en versiones nuevas de Flet
+        dlg.open = True
+        page.update()
 
+    # --- ARMADO DE PÁGINA ---
     page.add(
         ft.Row([
             ft.CircleAvatar(content=ft.Text("JA"), bgcolor="#f59e0b", color="black"),
@@ -237,7 +236,21 @@ def main(page: ft.Page):
         ft.Divider(height=10, color="transparent"),
         ft.Row([sb_filtros], alignment=ft.MainAxisAlignment.CENTER),
         ft.Divider(height=10, color="transparent"),
-        ft.Row([txt_nueva_mat, ft.IconButton(ft.Icons.ADD_CIRCLE, on_click=lambda _: (state["materias"].append(txt_nueva_mat.value), txt_nueva_mat.update(value=""), guardar_y_refrescar()), icon_color="#f59e0b")]),
+        
+        # SECCIÓN AGREGAR MATERIA (CORREGIDA)
+        ft.Row([
+            txt_nueva_mat, 
+            ft.IconButton(
+                ft.Icons.ADD_CIRCLE, 
+                icon_color="#f59e0b",
+                on_click=lambda _: (
+                    state["materias"].append(txt_nueva_mat.value) if txt_nueva_mat.value else None,
+                    setattr(txt_nueva_mat, "value", ""),
+                    guardar_y_refrescar()
+                )
+            )
+        ]),
+        
         ft.Row([dd_materia, dd_prio]),
         txt_act,
         ft.Row([txt_fec, btn_registrar]),
@@ -245,7 +258,12 @@ def main(page: ft.Page):
         ft.Row([txt_titulo_lista, ft.Text(f"{len(state['entregas'])} total", size=12, color="#64748b")]),
         lista_tareas_ui
     )
-    renderizar_tareas(); actualizar_progreso(); actualizar_dashboard()
+    
+    # Renderizado inicial
+    renderizar_tareas()
+    actualizar_progreso()
+    actualizar_dashboard()
 
 if __name__ == "__main__":
+    # Inicia como web para Render
     ft.app(target=main)
