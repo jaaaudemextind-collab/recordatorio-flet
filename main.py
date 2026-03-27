@@ -13,7 +13,7 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 def main(page: ft.Page):
     # --- CONFIGURACIÓN DE VENTANA ---
-    page.title = "Panel Académico TI"
+    page.title = "LTIND"
     page.theme_mode = ft.ThemeMode.DARK
     page.bgcolor = "#0f172a" 
     page.padding = 20
