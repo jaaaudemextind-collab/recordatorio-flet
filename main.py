@@ -30,20 +30,24 @@ def main(page: ft.Page):
     dashboard_ui = ft.Row(wrap=True, spacing=10)
     calendario_grid = ft.Column(horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=5)
     
-    # --- COMPONENTES DE NOTIFICACIÓN ---
+    # --- COMPONENTES DE NOTIFICACIÓN (CORREGIDOS) ---
     txt_notif_count = ft.Text("0", size=10, weight="bold", color="white")
     badge_notif = ft.Container(
         content=txt_notif_count,
         bgcolor="#ef4444",
         border_radius=10,
         padding=ft.padding.only(left=5, right=5),
-        position=ft.ControlPosition(top=0, right=0),
+        top=0,
+        right=0,
         visible=False
     )
     
     btn_notificaciones = ft.Stack([
-        ft.IconButton(icon=ft.Icons.NOTIFICATIONS_OUTLINED, icon_color="#94a3b8", 
-                      on_click=lambda _: mostrar_alerta_vencimiento()),
+        ft.IconButton(
+            icon=ft.Icons.NOTIFICATIONS_OUTLINED, 
+            icon_color="#94a3b8", 
+            on_click=lambda _: mostrar_alerta_vencimiento()
+        ),
         badge_notif
     ])
 
@@ -77,7 +81,7 @@ def main(page: ft.Page):
             renderizar_tareas()
             renderizar_historial()
             renderizar_calendario()
-            actualizar_notificaciones() # <--- Actualizamos campana al cargar
+            actualizar_notificaciones() # Mantiene la campana al día
         except Exception as ex:
             print(f"Error de conexión Supabase: {ex}")
 
@@ -103,9 +107,9 @@ def main(page: ft.Page):
 
     def mostrar_alerta_vencimiento():
         page.snack_bar = ft.SnackBar(
-            ft.Text(f"Atención: Tienes {txt_notif_count.value} entregas próximas (24h)."),
+            ft.Text(f"Tienes {txt_notif_count.value} entregas prioritarias para hoy."),
             bgcolor="#1e293b",
-            action="OK"
+            action="Entendido"
         )
         page.snack_bar.open = True
         page.update()
@@ -296,7 +300,7 @@ def main(page: ft.Page):
         ft.Row([
             ft.CircleAvatar(content=ft.Text("JA"), bgcolor="#f59e0b", color="black"), 
             ft.Column([ft.Text("Jose A Alcantara Aladin", size=18, weight="bold"), ft.Text("LTIND UDEMEX", size=12, color="#94a3b8")], spacing=0, expand=True), 
-            btn_notificaciones, # <--- Campana añadida aquí
+            btn_notificaciones, 
             ft.IconButton(ft.Icons.SETTINGS_SUGGEST_ROUNDED, on_click=lambda _: None)
         ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
         ft.Column([txt_pct, pb_barra], spacing=5),
