@@ -2,6 +2,7 @@ import flet as ft
 import os
 import re
 import pytz
+import calendar
 from datetime import datetime
 from supabase import create_client, Client
 
@@ -25,25 +26,25 @@ def main(page: ft.Page):
 
     # --- COMPONENTES UI PRINCIPALES ---
     lista_tareas_ui = ft.Column(spacing=12)
-    lista_completadas_ui = ft.Column(spacing=8, visible=False) # Historial oculto inicialmente
+    lista_completadas_ui = ft.Column(spacing=8, visible=False)
     dashboard_ui = ft.Row(wrap=True, spacing=10)
+    calendario_grid = ft.Column(horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=5)
+    
     pb_barra = ft.ProgressBar(height=8, border_radius=5, color="#f59e0b", bgcolor="#1e293b", value=0)
     txt_pct = ft.Text("0% Completado", size=12, weight="bold", color="#f59e0b")
     txt_titulo_lista = ft.Text("Pendientes Críticos", size=16, weight="bold", expand=True)
     txt_contador = ft.Text("0 pendientes", size=12, color="#64748b")
 
-    # --- FUNCIONES DE BASE DE DATOS (SUPABASE) ---
+    # --- FUNCIONES DE BASE DE DATOS ---
 
     def cargar_datos_db():
         try:
             res_m = supabase.table("materias").select("*").execute()
             state["materias"] = [m["nombre"] for m in res_m.data]
             
-            # Pendientes
             res_e = supabase.table("entregas").select("*").eq("completada", False).execute()
             state["entregas"] = res_e.data
             
-            # Completadas para el historial
             res_c = supabase.table("entregas").select("*").eq("completada", True).execute()
             state["completadas"] = res_c.data
             state["completadas_count"] = len(res_c.data)
@@ -58,6 +59,7 @@ def main(page: ft.Page):
             actualizar_progreso()
             renderizar_tareas()
             renderizar_historial()
+            renderizar_calendario()
         except Exception as ex:
             print(f"Error de conexión Supabase: {ex}")
 
@@ -81,6 +83,11 @@ def main(page: ft.Page):
         sb_filtros.selected = {"todos"}
         renderizar_tareas()
 
+    def filtrar_por_dia(dia):
+        filtro_activo["tipo"] = "dia"
+        filtro_activo["valor"] = dia
+        renderizar_tareas()
+
     def actualizar_dashboard():
         dashboard_ui.controls = []
         for mat_dash, count in state["historial_completadas"].items():
@@ -94,6 +101,51 @@ def main(page: ft.Page):
                         on_click=lambda _, m=mat_dash: filtrar_por_materia(m)
                     )
                 )
+
+    def renderizar_calendario():
+        mexico_tz = pytz.timezone('America/Mexico_City')
+        ahora = datetime.now(mexico_tz)
+        mes, anio = ahora.month, ahora.year
+        
+        # Mapear tareas pendientes por día
+        tareas_dias = {}
+        for t in state["entregas"]:
+            try:
+                d = int(t["fecha"].split("/")[0])
+                tareas_dias[d] = tareas_dias.get(d, 0) + 1
+            except: continue
+
+        cal = calendar.monthcalendar(anio, mes)
+        nombres_meses = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
+        
+        grid_rows = [
+            ft.Text(f"{nombres_meses[mes-1]} {anio}", size=14, weight="bold"),
+            ft.Row([ft.Text(d, size=10, width=32, text_align="center", color="#64748b") for d in ["L","M","M","J","V","S","D"]], alignment=ft.MainAxisAlignment.CENTER)
+        ]
+
+        for week in cal:
+            week_row = ft.Row(alignment=ft.MainAxisAlignment.CENTER, spacing=5)
+            for day in week:
+                if day == 0:
+                    week_row.controls.append(ft.Container(width=32, height=32))
+                else:
+                    tiene_tarea = day in tareas_dias
+                    es_hoy = (day == ahora.day)
+                    week_row.controls.append(
+                        ft.Container(
+                            content=ft.Column([
+                                ft.Text(str(day), size=11, weight="bold" if tiene_tarea else "normal", color="white" if not tiene_tarea else "#f59e0b"),
+                                ft.Container(width=4, height=4, bgcolor="#f59e0b", border_radius=2, visible=tiene_tarea)
+                            ], alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=2),
+                            width=32, height=35,
+                            bgcolor="#3b82f6" if es_hoy else "#1e293b",
+                            border_radius=6,
+                            on_click=lambda _, d=day: filtrar_por_dia(d)
+                        )
+                    )
+            grid_rows.append(week_row)
+        
+        calendario_grid.controls = grid_rows
         page.update()
 
     def obtener_tiempo_restante(fecha_str):
@@ -104,12 +156,10 @@ def main(page: ft.Page):
             fecha_meta = mexico_tz.localize(fecha_meta)
             diff = fecha_meta - ahora
             segundos = diff.total_seconds()
-            
             if segundos < 0: return "⚠️ Vencida", "#ef4444", False, segundos
             urgente = segundos < 86400 
             dias, horas = diff.days, diff.seconds // 3600
             mins = (diff.seconds % 3600) // 60
-            
             if dias > 0: return f"Faltan {dias}d {horas}h", "#94a3b8", urgente, segundos
             if horas > 0: return f"En {horas}h {mins}m", "#fbbf24", urgente, segundos
             return f"En {mins} min", "#f59e0b", urgente, segundos
@@ -120,26 +170,20 @@ def main(page: ft.Page):
         guardar_y_refrescar()
 
     def recuperar_tarea(entrega):
-        # Función para regresar una tarea completada a la lista de pendientes
         supabase.table("entregas").update({"completada": False}).eq("id", entrega["id"]).execute()
         guardar_y_refrescar()
 
     def iniciar_edicion(entrega):
         tarea_editando["ref"] = entrega
-        dd_materia.value = entrega["materia"]
-        dd_prio.value = entrega["prio"]
-        txt_act.value = entrega["actividad"]
-        txt_fec.value = entrega["fecha"]
-        btn_registrar.text = "Actualizar"
-        btn_registrar.bgcolor = ft.Colors.BLUE_700
-        btn_registrar.icon = ft.Icons.EDIT_NOTE
-        page.update()
+        dd_materia.value = entrega["materia"]; dd_prio.value = entrega["prio"]
+        txt_act.value = entrega["actividad"]; txt_fec.value = entrega["fecha"]
+        btn_registrar.text = "Actualizar"; btn_registrar.bgcolor = ft.Colors.BLUE_700
+        btn_registrar.icon = ft.Icons.EDIT_NOTE; page.update()
 
     def crear_card_tarea(entrega):
         prio_conf = {"Crítica": "#ef4444", "Media": "#f59e0b", "Baja": "#3b82f6"}
         conf_color = prio_conf.get(entrega.get("prio", "Media"), "#f59e0b")
-        txt_tiempo, color_tiempo, es_urgente, _ = obtener_tiempo_restante(entrega['fecha'])
-
+        txt_tiempo, color_tiempo, _, _ = obtener_tiempo_restante(entrega['fecha'])
         return ft.Container(
             content=ft.Row([
                 ft.Container(width=5, bgcolor=conf_color, border_radius=5, height=60),
@@ -147,10 +191,7 @@ def main(page: ft.Page):
                     ft.Column([
                         ft.Text(entrega['materia'], weight="bold", size=14),
                         ft.Text(entrega['actividad'], size=13, color="#94a3b8"),
-                        ft.Row([
-                            ft.Text(f"📅 {entrega['fecha']}", size=11, color="#f8fafc"),
-                            ft.Text(txt_tiempo, size=11, weight="bold", color=color_tiempo)
-                        ], spacing=10)
+                        ft.Row([ft.Text(f"📅 {entrega['fecha']}", size=11, color="#f8fafc"), ft.Text(txt_tiempo, size=11, weight="bold", color=color_tiempo)], spacing=10)
                     ], spacing=2, expand=True),
                     ft.Row([
                         ft.IconButton(icon=ft.Icons.EDIT_OUTLINED, icon_size=18, icon_color="#94a3b8", on_click=lambda _: iniciar_edicion(entrega)),
@@ -161,145 +202,81 @@ def main(page: ft.Page):
             bgcolor="#1e293b", border_radius=12, border=ft.border.all(1, "#334155"), padding=12
         )
 
-    def render_historial_card(entrega):
-        return ft.Container(
-            content=ft.Row([
-                ft.Column([
-                    ft.Text(f"{entrega['materia']}: {entrega['actividad']}", size=12, color="#94a3b8", italic=True),
-                    ft.Text(f"Finalizada", size=10, color="#64748b")
-                ], expand=True),
-                ft.TextButton("Deshacer", icon=ft.Icons.UNDO, icon_color="#3b82f6", on_click=lambda _: recuperar_tarea(entrega))
-            ]),
-            padding=5,
-            border=ft.border.only(bottom=ft.border.BorderSide(1, "#1e293b"))
-        )
-
     def renderizar_tareas():
         tareas_a_mostrar = state["entregas"]
         hay_urgente = False
-        
         if filtro_activo["tipo"] == "proximas":
             txt_titulo_lista.value = "Próximas (48h)"
             tareas_a_mostrar = [t for t in state["entregas"] if 0 <= obtener_tiempo_restante(t["fecha"])[3] <= 172800]
         elif filtro_activo["tipo"] == "materia":
             txt_titulo_lista.value = f"Materia: {filtro_activo['valor']}"
             tareas_a_mostrar = [t for t in state["entregas"] if t["materia"] == filtro_activo["valor"]]
+        elif filtro_activo["tipo"] == "dia":
+            txt_titulo_lista.value = f"Entregas del día {filtro_activo['valor']}"
+            tareas_a_mostrar = [t for t in state["entregas"] if int(t["fecha"].split("/")[0]) == filtro_activo["valor"]]
         else:
             txt_titulo_lista.value = "Pendientes Críticos"
 
         for t in tareas_a_mostrar:
-            if 0 <= obtener_tiempo_restante(t["fecha"])[3] <= 86400:
-                hay_urgente = True; break
-
+            if 0 <= obtener_tiempo_restante(t["fecha"])[3] <= 86400: hay_urgente = True; break
         txt_contador.value = f"{len(tareas_a_mostrar)} pendientes"
         txt_contador.color = "#ef4444" if hay_urgente else "#64748b"
 
         pesos = {"Crítica": 0, "Media": 1, "Baja": 2}
         ordenadas = sorted(tareas_a_mostrar, key=lambda x: pesos.get(x.get("prio", "Media"), 1))
         lista_tareas_ui.controls = [crear_card_tarea(ent) for ent in ordenadas]
-        
-        if not tareas_a_mostrar:
-            lista_tareas_ui.controls = [ft.Container(ft.Text("Sin tareas pendientes", italic=True, color="#64748b"), padding=20)]
-        
+        if not tareas_a_mostrar: lista_tareas_ui.controls = [ft.Container(ft.Text("Sin tareas", italic=True, color="#64748b"), padding=20)]
         actualizar_dashboard()
         page.update()
 
     def renderizar_historial():
-        # Llenamos la lista de completadas (más recientes arriba)
-        lista_completadas_ui.controls = [render_historial_card(c) for c in reversed(state["completadas"])]
-        if not state["completadas"]:
-            lista_completadas_ui.controls = [ft.Text("No hay tareas finalizadas", size=12, color="#64748b", italic=True)]
+        lista_completadas_ui.controls = [ft.Container(content=ft.Row([ft.Column([ft.Text(f"{c['materia']}: {c['actividad']}", size=12, color="#94a3b8", italic=True)], expand=True), ft.TextButton("Deshacer", icon=ft.Icons.UNDO, on_click=lambda _, item=c: recuperar_tarea(item))]), padding=5, border=ft.border.only(bottom=ft.border.BorderSide(1, "#1e293b"))) for c in reversed(state["completadas"])]
+        if not state["completadas"]: lista_completadas_ui.controls = [ft.Text("Vacío", size=12, color="#64748b")]
         page.update()
 
     # --- UI COMPONENTS ---
-    def toggle_historial(e):
-        lista_completadas_ui.visible = not lista_completadas_ui.visible
-        btn_historial.icon = ft.Icons.KEYBOARD_ARROW_UP if lista_completadas_ui.visible else ft.Icons.KEYBOARD_ARROW_DOWN
-        page.update()
-
-    btn_historial = ft.TextButton("Ver historial de completadas", icon=ft.Icons.KEYBOARD_ARROW_DOWN, on_click=toggle_historial)
-
-    sb_filtros = ft.SegmentedButton(
-        selected={"todos"},
-        on_change=lambda e: (setattr(filtro_activo, "tipo", list(e.control.selected)[0]), renderizar_tareas()),
-        segments=[
-            ft.Segment(value="todos", label=ft.Text("Todo"), icon=ft.Icon(ft.Icons.ALL_INCLUSIVE)),
-            ft.Segment(value="proximas", label=ft.Text("Próximo"), icon=ft.Icon(ft.Icons.TIMER_OUTLINED)),
-        ],
-    )
-
+    sb_filtros = ft.SegmentedButton(selected={"todos"}, on_change=lambda e: (setattr(filtro_activo, "tipo", list(e.control.selected)[0]), renderizar_tareas()), segments=[ft.Segment(value="todos", label=ft.Text("Todo"), icon=ft.Icon(ft.Icons.ALL_INCLUSIVE)), ft.Segment(value="proximas", label=ft.Text("Próximo"), icon=ft.Icon(ft.Icons.TIMER_OUTLINED))])
     txt_nueva_mat = ft.TextField(label="Nueva Materia", expand=True, border_radius=10)
     dd_materia = ft.Dropdown(label="Asignatura", expand=True, border_radius=10, text_size=12)
-    
-    btn_filtro_rapido = ft.IconButton(
-        icon=ft.Icons.FILTER_ALT_OUTLINED, 
-        icon_color="#3b82f6", 
-        on_click=lambda _: filtrar_por_materia(dd_materia.value) if dd_materia.value else None
-    )
-
+    btn_filtro_rapido = ft.IconButton(icon=ft.Icons.FILTER_ALT_OUTLINED, icon_color="#3b82f6", on_click=lambda _: filtrar_por_materia(dd_materia.value))
     dd_prio = ft.Dropdown(label="Prioridad", width=110, border_radius=10, options=[ft.dropdown.Option(x) for x in ["Crítica", "Media", "Baja"]], value="Media")
     txt_act = ft.TextField(label="Descripción", border_radius=10)
     txt_fec = ft.TextField(label="Fecha (DD/MM HH:MM)", border_radius=10, expand=True)
 
     def registrar(e):
-        if not re.match(r"^\d{2}/\d{2} \d{2}:\d{2}$", txt_fec.value):
-            txt_fec.error_text = "Formato: DD/MM HH:MM"; page.update(); return
-        if not dd_materia.value or not txt_act.value: return
-        
+        if not re.match(r"^\d{2}/\d{2} \d{2}:\d{2}$", txt_fec.value): txt_fec.error_text = "Error formato"; page.update(); return
         nueva_data = {"materia": dd_materia.value, "actividad": txt_act.value, "fecha": txt_fec.value, "prio": dd_prio.value}
-        
         if tarea_editando["ref"]:
             supabase.table("entregas").update(nueva_data).eq("id", tarea_editando["ref"]["id"]).execute()
             tarea_editando["ref"] = None
             btn_registrar.text = "Guardar"; btn_registrar.bgcolor = "#f59e0b"
-        else:
-            supabase.table("entregas").insert(nueva_data).execute()
-            
+        else: supabase.table("entregas").insert(nueva_data).execute()
         txt_act.value = ""; txt_fec.value = ""; guardar_y_refrescar()
 
     btn_registrar = ft.FloatingActionButton(icon=ft.Icons.PLAYLIST_ADD_ROUNDED, bgcolor="#f59e0b", on_click=registrar, text="Guardar")
+    btn_historial = ft.TextButton("Ver historial de completadas", icon=ft.Icons.KEYBOARD_ARROW_DOWN, on_click=lambda _: (setattr(lista_completadas_ui, "visible", not lista_completadas_ui.visible), page.update()))
 
-    def abrir_gestion(e):
-        def borrar(m_nombre):
-            supabase.table("materias").delete().eq("nombre", m_nombre).execute()
-            guardar_y_refrescar()
-            dlg.open = False; page.update()
-
-        dlg = ft.AlertDialog(
-            title=ft.Text("Materias"), 
-            content=ft.Column([ft.ListTile(title=ft.Text(m), trailing=ft.IconButton(ft.Icons.DELETE, on_click=lambda _, mi=m: borrar(mi))) for m in state["materias"]], tight=True, scroll=ft.ScrollMode.ALWAYS, height=300), 
-            actions=[ft.TextButton("Cerrar", on_click=lambda _: (setattr(dlg, "open", False), page.update()))]
-        )
-        page.overlay.append(dlg); dlg.open = True; page.update()
-
-    # --- ENSAMBLADO FINAL ---
+    # --- ENSAMBLADO ---
     page.add(
-        ft.Row([
-            ft.CircleAvatar(content=ft.Text("JA"), bgcolor="#f59e0b", color="black"),
-            ft.Column([ft.Text("Jose A Alcantara Aladin", size=18, weight="bold"), ft.Text("LTIND UDEMEX", size=12, color="#94a3b8")], spacing=0, expand=True),
-            ft.IconButton(ft.Icons.SETTINGS_SUGGEST_ROUNDED, on_click=abrir_gestion)
-        ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+        ft.Row([ft.CircleAvatar(content=ft.Text("JA"), bgcolor="#f59e0b", color="black"), ft.Column([ft.Text("Jose A Alcantara Aladin", size=18, weight="bold"), ft.Text("LTIND UDEMEX", size=12, color="#94a3b8")], spacing=0, expand=True), ft.IconButton(ft.Icons.SETTINGS_SUGGEST_ROUNDED, on_click=lambda _: None)], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
         ft.Column([txt_pct, pb_barra], spacing=5),
         ft.Text("Dashboard de Logros", size=11, weight="bold", color="#64748b"),
         dashboard_ui,
         ft.Divider(height=10, color="transparent"),
-        ft.Row([sb_filtros], alignment=ft.MainAxisAlignment.CENTER),
+        ft.Text("Calendario de Entregas", size=11, weight="bold", color="#64748b"),
+        ft.Container(calendario_grid, padding=15, bgcolor="#1e293b", border_radius=15),
         ft.Divider(height=10, color="transparent"),
-        ft.Row([
-            txt_nueva_mat, 
-            ft.IconButton(ft.Icons.ADD_CIRCLE, icon_color="#f59e0b", on_click=lambda _: (supabase.table("materias").insert({"nombre": txt_nueva_mat.value}).execute(), setattr(txt_nueva_mat, "value", ""), guardar_y_refrescar()))
-        ]),
-        ft.Row([dd_materia, btn_filtro_rapido, dd_prio], vertical_alignment=ft.CrossAxisAlignment.CENTER),
+        ft.Row([sb_filtros], alignment=ft.MainAxisAlignment.CENTER),
+        ft.Row([txt_nueva_mat, ft.IconButton(ft.Icons.ADD_CIRCLE, icon_color="#f59e0b", on_click=lambda _: (supabase.table("materias").insert({"nombre": txt_nueva_mat.value}).execute(), setattr(txt_nueva_mat, "value", ""), guardar_y_refrescar()))]),
+        ft.Row([dd_materia, btn_filtro_rapido, dd_prio]),
         txt_act,
         ft.Row([txt_fec, btn_registrar]),
         ft.Divider(height=20, color="#334155"),
         ft.Row([txt_titulo_lista, txt_contador]),
         lista_tareas_ui,
-        ft.Divider(height=20, color="transparent"),
         btn_historial,
-        lista_completadas_ui # Sección de historial
+        lista_completadas_ui
     )
-    
     cargar_datos_db()
 
 if __name__ == "__main__":
