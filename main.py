@@ -6,14 +6,13 @@ from datetime import datetime
 from supabase import create_client, Client
 
 # --- CONFIGURACIÓN SUPABASE ---
-# Asegúrate de que estas llaves sean las correctas de tu proyecto
 SUPABASE_URL = "https://bywrnjgvcggqvvptnpnv.supabase.co" 
 SUPABASE_KEY = "sb_publishable_ptTFX7JnTw7Jcx6F14Xpqg_q_n7MGQ5"
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 def main(page: ft.Page):
     # --- CONFIGURACIÓN DE VENTANA ---
-    page.title = "LTIND"
+    page.title = "Jose A.A.A.-LTIND"
     page.theme_mode = ft.ThemeMode.DARK
     page.bgcolor = "#0f172a" 
     page.padding = 20
@@ -30,20 +29,20 @@ def main(page: ft.Page):
     pb_barra = ft.ProgressBar(height=8, border_radius=5, color="#f59e0b", bgcolor="#1e293b", value=0)
     txt_pct = ft.Text("0% Completado", size=12, weight="bold", color="#f59e0b")
     txt_titulo_lista = ft.Text("Pendientes Críticos", size=16, weight="bold", expand=True)
+    
+    # FIX: Referencia fija para el contador para que sea actualizable
+    txt_contador = ft.Text("0 pendientes", size=12, color="#64748b")
 
     # --- FUNCIONES DE BASE DE DATOS (SUPABASE) ---
 
     def cargar_datos_db():
         try:
-            # 1. Materias
             res_m = supabase.table("materias").select("*").execute()
             state["materias"] = [m["nombre"] for m in res_m.data]
             
-            # 2. Pendientes
             res_e = supabase.table("entregas").select("*").eq("completada", False).execute()
             state["entregas"] = res_e.data
             
-            # 3. Estadísticas
             res_c = supabase.table("entregas").select("*").eq("completada", True).execute()
             state["completadas_count"] = len(res_c.data)
             
@@ -53,7 +52,6 @@ def main(page: ft.Page):
                 historial[m] = historial.get(m, 0) + 1
             state["historial_completadas"] = historial
 
-            # Actualizar componentes que dependen de datos
             dd_materia.options = [ft.dropdown.Option(m) for m in state["materias"]]
             actualizar_progreso()
             renderizar_tareas()
@@ -77,7 +75,7 @@ def main(page: ft.Page):
     def filtrar_por_materia(materia_nombre):
         filtro_activo["tipo"] = "materia"
         filtro_activo["valor"] = materia_nombre
-        sb_filtros.selected = {"todos"} # Reset visual
+        sb_filtros.selected = {"todos"}
         renderizar_tareas()
 
     def actualizar_dashboard():
@@ -158,7 +156,6 @@ def main(page: ft.Page):
     # --- MANEJO DE FILTROS ---
 
     def cambiar_filtro(e):
-        # Corrección: Usamos e.control.selected para evitar el AttributeError
         if e.control.selected:
             filtro_activo["tipo"] = list(e.control.selected)[0]
             filtro_activo["valor"] = None
@@ -170,10 +167,13 @@ def main(page: ft.Page):
             txt_titulo_lista.value = "Próximas (48h)"
             tareas_a_mostrar = [t for t in state["entregas"] if 0 <= obtener_tiempo_restante(t["fecha"])[3] <= 172800]
         elif filtro_activo["tipo"] == "materia":
-            txt_titulo_lista.value = f"Pendientes de: {filtro_activo['valor']}"
+            txt_titulo_lista.value = f"Materia: {filtro_activo['valor']}"
             tareas_a_mostrar = [t for t in state["entregas"] if t["materia"] == filtro_activo["valor"]]
         else:
             txt_titulo_lista.value = "Pendientes Críticos"
+
+        # FIX: Actualizar el contador dinámicamente con la lista filtrada
+        txt_contador.value = f"{len(tareas_a_mostrar)} pendientes"
 
         pesos = {"Crítica": 0, "Media": 1, "Baja": 2}
         ordenadas = sorted(tareas_a_mostrar, key=lambda x: pesos.get(x.get("prio", "Media"), 1))
@@ -196,9 +196,10 @@ def main(page: ft.Page):
     )
 
     txt_nueva_mat = ft.TextField(label="Nueva Materia", expand=True, border_radius=10)
+    
+    # Dropdown con expand=True y texto un poco más pequeño para evitar desbordes
     dd_materia = ft.Dropdown(label="Asignatura", expand=True, border_radius=10, text_size=12)
     
-    # Botón de filtro por asignatura seleccionada
     btn_filtro_rapido = ft.IconButton(
         icon=ft.Icons.FILTER_ALT_OUTLINED, 
         icon_color="#3b82f6", 
@@ -248,7 +249,7 @@ def main(page: ft.Page):
     page.add(
         ft.Row([
             ft.CircleAvatar(content=ft.Text("JA"), bgcolor="#f59e0b", color="black"),
-            ft.Column([ft.Text("Jose A Alcantara Aladin", size=18, weight="bold"), ft.Text("Gestión Académica TI", size=12, color="#94a3b8")], spacing=0, expand=True),
+            ft.Column([ft.Text("Jose A Alcantara Aladin", size=18, weight="bold"), ft.Text("LTIND UDEMEX", size=12, color="#94a3b8")], spacing=0, expand=True),
             ft.IconButton(ft.Icons.SETTINGS_SUGGEST_ROUNDED, on_click=abrir_gestion)
         ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
         ft.Column([txt_pct, pb_barra], spacing=5),
@@ -267,15 +268,15 @@ def main(page: ft.Page):
                 )
             )
         ]),
-        ft.Row([dd_materia, btn_filtro_rapido, dd_prio]),
+        ft.Row([dd_materia, btn_filtro_rapido, dd_prio], vertical_alignment=ft.CrossAxisAlignment.CENTER),
         txt_act,
         ft.Row([txt_fec, btn_registrar]),
         ft.Divider(height=20, color="#334155"),
-        ft.Row([txt_titulo_lista, ft.Text(f"{len(state['entregas'])} pendientes", size=12, color="#64748b")]),
+        # FIX: Ahora usamos txt_contador que se actualiza en renderizar_tareas
+        ft.Row([txt_titulo_lista, txt_contador]),
         lista_tareas_ui
     )
     
-    # Carga inicial
     cargar_datos_db()
 
 if __name__ == "__main__":
