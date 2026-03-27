@@ -30,6 +30,23 @@ def main(page: ft.Page):
     dashboard_ui = ft.Row(wrap=True, spacing=10)
     calendario_grid = ft.Column(horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=5)
     
+    # --- COMPONENTES DE NOTIFICACIÓN ---
+    txt_notif_count = ft.Text("0", size=10, weight="bold", color="white")
+    badge_notif = ft.Container(
+        content=txt_notif_count,
+        bgcolor="#ef4444",
+        border_radius=10,
+        padding=ft.padding.only(left=5, right=5),
+        position=ft.ControlPosition(top=0, right=0),
+        visible=False
+    )
+    
+    btn_notificaciones = ft.Stack([
+        ft.IconButton(icon=ft.Icons.NOTIFICATIONS_OUTLINED, icon_color="#94a3b8", 
+                      on_click=lambda _: mostrar_alerta_vencimiento()),
+        badge_notif
+    ])
+
     pb_barra = ft.ProgressBar(height=8, border_radius=5, color="#f59e0b", bgcolor="#1e293b", value=0)
     txt_pct = ft.Text("0% Completado", size=12, weight="bold", color="#f59e0b")
     txt_titulo_lista = ft.Text("Pendientes Críticos", size=16, weight="bold", expand=True)
@@ -60,6 +77,7 @@ def main(page: ft.Page):
             renderizar_tareas()
             renderizar_historial()
             renderizar_calendario()
+            actualizar_notificaciones() # <--- Actualizamos campana al cargar
         except Exception as ex:
             print(f"Error de conexión Supabase: {ex}")
 
@@ -67,6 +85,30 @@ def main(page: ft.Page):
         cargar_datos_db()
 
     # --- LÓGICA DE NEGOCIO ---
+
+    def actualizar_notificaciones():
+        urgentes = 0
+        for t in state["entregas"]:
+            _, _, _, segundos = obtener_tiempo_restante(t["fecha"])
+            # Si falta menos de 24 horas y no ha vencido
+            if 0 < segundos <= 86400:
+                urgentes += 1
+        
+        if urgentes > 0:
+            txt_notif_count.value = str(urgentes)
+            badge_notif.visible = True
+        else:
+            badge_notif.visible = False
+        page.update()
+
+    def mostrar_alerta_vencimiento():
+        page.snack_bar = ft.SnackBar(
+            ft.Text(f"Atención: Tienes {txt_notif_count.value} entregas próximas (24h)."),
+            bgcolor="#1e293b",
+            action="OK"
+        )
+        page.snack_bar.open = True
+        page.update()
 
     def actualizar_progreso():
         pend = len(state["entregas"])
@@ -106,23 +148,18 @@ def main(page: ft.Page):
         mexico_tz = pytz.timezone('America/Mexico_City')
         ahora = datetime.now(mexico_tz)
         mes, anio = ahora.month, ahora.year
-        
-        # Mapear tareas pendientes por día
         tareas_dias = {}
         for t in state["entregas"]:
             try:
                 d = int(t["fecha"].split("/")[0])
                 tareas_dias[d] = tareas_dias.get(d, 0) + 1
             except: continue
-
         cal = calendar.monthcalendar(anio, mes)
         nombres_meses = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
-        
         grid_rows = [
             ft.Text(f"{nombres_meses[mes-1]} {anio}", size=14, weight="bold"),
             ft.Row([ft.Text(d, size=10, width=32, text_align="center", color="#64748b") for d in ["L","M","M","J","V","S","D"]], alignment=ft.MainAxisAlignment.CENTER)
         ]
-
         for week in cal:
             week_row = ft.Row(alignment=ft.MainAxisAlignment.CENTER, spacing=5)
             for day in week:
@@ -144,7 +181,6 @@ def main(page: ft.Page):
                         )
                     )
             grid_rows.append(week_row)
-        
         calendario_grid.controls = grid_rows
         page.update()
 
@@ -221,7 +257,6 @@ def main(page: ft.Page):
             if 0 <= obtener_tiempo_restante(t["fecha"])[3] <= 86400: hay_urgente = True; break
         txt_contador.value = f"{len(tareas_a_mostrar)} pendientes"
         txt_contador.color = "#ef4444" if hay_urgente else "#64748b"
-
         pesos = {"Crítica": 0, "Media": 1, "Baja": 2}
         ordenadas = sorted(tareas_a_mostrar, key=lambda x: pesos.get(x.get("prio", "Media"), 1))
         lista_tareas_ui.controls = [crear_card_tarea(ent) for ent in ordenadas]
@@ -258,7 +293,12 @@ def main(page: ft.Page):
 
     # --- ENSAMBLADO ---
     page.add(
-        ft.Row([ft.CircleAvatar(content=ft.Text("JA"), bgcolor="#f59e0b", color="black"), ft.Column([ft.Text("Jose A Alcantara Aladin", size=18, weight="bold"), ft.Text("LTIND UDEMEX", size=12, color="#94a3b8")], spacing=0, expand=True), ft.IconButton(ft.Icons.SETTINGS_SUGGEST_ROUNDED, on_click=lambda _: None)], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+        ft.Row([
+            ft.CircleAvatar(content=ft.Text("JA"), bgcolor="#f59e0b", color="black"), 
+            ft.Column([ft.Text("Jose A Alcantara Aladin", size=18, weight="bold"), ft.Text("LTIND UDEMEX", size=12, color="#94a3b8")], spacing=0, expand=True), 
+            btn_notificaciones, # <--- Campana añadida aquí
+            ft.IconButton(ft.Icons.SETTINGS_SUGGEST_ROUNDED, on_click=lambda _: None)
+        ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
         ft.Column([txt_pct, pb_barra], spacing=5),
         ft.Text("Dashboard de Logros", size=11, weight="bold", color="#64748b"),
         dashboard_ui,
