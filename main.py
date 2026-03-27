@@ -30,8 +30,8 @@ def main(page: ft.Page):
     txt_pct = ft.Text("0% Completado", size=12, weight="bold", color="#f59e0b")
     txt_titulo_lista = ft.Text("Pendientes Críticos", size=16, weight="bold", expand=True)
     
-    # Contador con animación de parpadeo para urgencia
-    txt_contador = ft.Text("0 pendientes", size=12, color="#64748b", animate_opacity=300)
+    # Contador con soporte para alertas de urgencia
+    txt_contador = ft.Text("0 pendientes", size=12, color="#64748b")
 
     # --- FUNCIONES DE BASE DE DATOS (SUPABASE) ---
 
@@ -97,14 +97,13 @@ def main(page: ft.Page):
         try:
             mexico_tz = pytz.timezone('America/Mexico_City')
             ahora = datetime.now(mexico_tz)
-            # Manejamos el año dinámico para evitar errores
             fecha_meta = datetime.strptime(f"{fecha_str} {ahora.year}", "%d/%m %H:%M %Y")
             fecha_meta = mexico_tz.localize(fecha_meta)
             diff = fecha_meta - ahora
             segundos = diff.total_seconds()
             
             if segundos < 0: return "⚠️ Vencida", "#ef4444", False, segundos
-            urgente = segundos < 86400 # 24 horas en segundos
+            urgente = segundos < 86400 # Menos de 24 horas
             dias, horas = diff.days, diff.seconds // 3600
             mins = (diff.seconds % 3600) // 60
             
@@ -175,21 +174,15 @@ def main(page: ft.Page):
         else:
             txt_titulo_lista.value = "Pendientes Críticos"
 
-        # Lógica de color de contador según urgencia (< 24h)
+        # Lógica de color de contador según urgencia
         for t in tareas_a_mostrar:
             if 0 <= obtener_tiempo_restante(t["fecha"])[3] <= 86400:
                 hay_urgente = True
                 break
 
         txt_contador.value = f"{len(tareas_a_mostrar)} pendientes"
-        if hay_urgente:
-            txt_contador.color = "#ef4444"
-            txt_contador.weight = "bold"
-            txt_contador.opacity = 0.5 # Efecto parpadeo inicial
-        else:
-            txt_contador.color = "#64748b"
-            txt_contador.weight = "normal"
-            txt_contador.opacity = 1
+        txt_contador.color = "#ef4444" if hay_urgente else "#64748b"
+        txt_contador.weight = "bold" if hay_urgente else "normal"
 
         pesos = {"Crítica": 0, "Media": 1, "Baja": 2}
         ordenadas = sorted(tareas_a_mostrar, key=lambda x: pesos.get(x.get("prio", "Media"), 1))
@@ -200,27 +193,6 @@ def main(page: ft.Page):
         
         actualizar_dashboard()
         page.update()
-        
-        # Pequeño delay para el parpadeo si es urgente
-        if hay_urgente:
-            txt_contador.opacity = 1
-            page.update()
-
-    # --- COMPONENTES DE FECHA (PICKERS) ---
-    def handle_date_change(e):
-        # Al elegir fecha, abrimos el de hora automáticamente
-        page.open(time_picker)
-
-    def handle_time_change(e):
-        # Formateamos ambos valores en el TextField
-        fecha = date_picker.value.strftime("%d/%m")
-        hora = time_picker.value.strftime("%H:%M")
-        txt_fec.value = f"{fecha} {hora}"
-        page.update()
-
-    date_picker = ft.DatePicker(on_change=handle_date_change)
-    time_picker = ft.TimePicker(on_change=handle_time_change)
-    page.overlay.extend([date_picker, time_picker])
 
     # --- UI COMPONENTS ---
     sb_filtros = ft.SegmentedButton(
@@ -244,20 +216,13 @@ def main(page: ft.Page):
     dd_prio = ft.Dropdown(label="Prioridad", width=110, border_radius=10, options=[ft.dropdown.Option(x) for x in ["Crítica", "Media", "Baja"]], value="Media")
     txt_act = ft.TextField(label="Descripción", border_radius=10)
     
-    # Campo de fecha ahora abre los pickers al hacer clic
-    txt_fec = ft.TextField(
-        label="Fecha y Hora", 
-        border_radius=10, 
-        expand=True, 
-        read_only=True,
-        hint_text="Toca para seleccionar",
-        on_focus=lambda _: page.open(date_picker),
-        prefix_icon=ft.Icons.CALENDAR_MONTH
-    )
+    # REGRESAMOS AL INPUT MANUAL DE TEXTO
+    txt_fec = ft.TextField(label="Fecha (DD/MM HH:MM)", border_radius=10, expand=True)
 
     def registrar(e):
-        if not txt_fec.value:
-            txt_fec.error_text = "Selecciona fecha"; page.update(); return
+        # Validamos el formato manual nuevamente
+        if not re.match(r"^\d{2}/\d{2} \d{2}:\d{2}$", txt_fec.value):
+            txt_fec.error_text = "Formato: DD/MM HH:MM"; page.update(); return
         if not dd_materia.value or not txt_act.value: return
         
         nueva_data = {"materia": dd_materia.value, "actividad": txt_act.value, "fecha": txt_fec.value, "prio": dd_prio.value}
