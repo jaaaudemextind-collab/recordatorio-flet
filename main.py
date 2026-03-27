@@ -5,66 +5,65 @@ import pytz
 from datetime import datetime
 from supabase import create_client, Client
 
-# --- CONFIGURACIÓN SUPABASE (PEGA TUS LLAVES AQUÍ) ---
+# --- CONFIGURACIÓN SUPABASE ---
+# Asegúrate de que estas llaves sean las correctas de tu proyecto
 SUPABASE_URL = "https://bywrnjgvcggqvvptnpnv.supabase.co" 
 SUPABASE_KEY = "sb_publishable_ptTFX7JnTw7Jcx6F14Xpqg_q_n7MGQ5"
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 def main(page: ft.Page):
-    # --- CONFIGURACIÓN DE VENTANA (RESPETADA) ---
+    # --- CONFIGURACIÓN DE VENTANA ---
     page.title = "Panel Académico TI"
     page.theme_mode = ft.ThemeMode.DARK
     page.bgcolor = "#0f172a" 
     page.padding = 20
     page.scroll = ft.ScrollMode.ADAPTIVE
 
-    # Estado de la aplicación sincronizado con DB
+    # Estado de la aplicación
     state = {"materias": [], "entregas": [], "completadas_count": 0, "historial_completadas": {}}
     filtro_activo = {"tipo": "todos", "valor": None}
     tarea_editando = {"ref": None}
 
-    # --- COMPONENTES UI (RESPETADOS) ---
+    # --- COMPONENTES UI PRINCIPALES ---
     lista_tareas_ui = ft.Column(spacing=12)
     dashboard_ui = ft.Row(wrap=True, spacing=10)
     pb_barra = ft.ProgressBar(height=8, border_radius=5, color="#f59e0b", bgcolor="#1e293b", value=0)
     txt_pct = ft.Text("0% Completado", size=12, weight="bold", color="#f59e0b")
     txt_titulo_lista = ft.Text("Pendientes Críticos", size=16, weight="bold", expand=True)
 
-    # --- NUEVAS FUNCIONES DE PERSISTENCIA (SUPABASE) ---
+    # --- FUNCIONES DE BASE DE DATOS (SUPABASE) ---
 
     def cargar_datos_db():
         try:
-            # 1. Cargar Materias
+            # 1. Materias
             res_m = supabase.table("materias").select("*").execute()
             state["materias"] = [m["nombre"] for m in res_m.data]
             
-            # 2. Cargar Entregas Pendientes
+            # 2. Pendientes
             res_e = supabase.table("entregas").select("*").eq("completada", False).execute()
             state["entregas"] = res_e.data
             
-            # 3. Cargar Estadísticas para Dashboard y Progreso
+            # 3. Estadísticas
             res_c = supabase.table("entregas").select("*").eq("completada", True).execute()
             state["completadas_count"] = len(res_c.data)
             
-            # Calcular historial para el dashboard
             historial = {}
             for t in res_c.data:
                 m = t["materia"]
                 historial[m] = historial.get(m, 0) + 1
             state["historial_completadas"] = historial
 
-            # Sincronizar UI
+            # Actualizar componentes que dependen de datos
             dd_materia.options = [ft.dropdown.Option(m) for m in state["materias"]]
             actualizar_progreso()
             renderizar_tareas()
         except Exception as ex:
-            print(f"Error de conexión: {ex}")
+            print(f"Error de conexión Supabase: {ex}")
 
     def guardar_y_refrescar():
-        # Ya no necesitamos escribir en JSON, refrescamos desde la nube
         cargar_datos_db()
 
-    # --- LÓGICA DE NEGOCIO (RESPETADA) ---
+    # --- LÓGICA DE NEGOCIO ---
 
     def actualizar_progreso():
         pend = len(state["entregas"])
@@ -78,6 +77,7 @@ def main(page: ft.Page):
     def filtrar_por_materia(materia_nombre):
         filtro_activo["tipo"] = "materia"
         filtro_activo["valor"] = materia_nombre
+        sb_filtros.selected = {"todos"} # Reset visual
         renderizar_tareas()
 
     def actualizar_dashboard():
@@ -103,14 +103,20 @@ def main(page: ft.Page):
             fecha_meta = mexico_tz.localize(fecha_meta)
             diff = fecha_meta - ahora
             segundos = diff.total_seconds()
+            
             if segundos < 0: return "⚠️ Vencida", "#ef4444", False, segundos
             urgente = segundos < 7200
             dias, horas = diff.days, diff.seconds // 3600
             mins = (diff.seconds % 3600) // 60
+            
             if dias > 0: return f"Faltan {dias}d {horas}h", "#94a3b8", urgente, segundos
             if horas > 0: return f"En {horas}h {mins}m", "#fbbf24", urgente, segundos
             return f"En {mins} min", "#f59e0b", urgente, segundos
         except: return "Pendiente", "#64748b", False, 999999
+
+    def completar_tarea(entrega):
+        supabase.table("entregas").update({"completada": True}).eq("id", entrega["id"]).execute()
+        guardar_y_refrescar()
 
     def iniciar_edicion(entrega):
         tarea_editando["ref"] = entrega
@@ -122,11 +128,6 @@ def main(page: ft.Page):
         btn_registrar.bgcolor = ft.Colors.BLUE_700
         btn_registrar.icon = ft.Icons.EDIT_NOTE
         page.update()
-
-    def completar_tarea(entrega):
-        # Actualizar en Supabase
-        supabase.table("entregas").update({"completada": True}).eq("id", entrega["id"]).execute()
-        guardar_y_refrescar()
 
     def crear_card_tarea(entrega):
         prio_conf = {"Crítica": "#ef4444", "Media": "#f59e0b", "Baja": "#3b82f6"}
@@ -154,10 +155,14 @@ def main(page: ft.Page):
             bgcolor="#1e293b", border_radius=12, border=ft.border.all(1, "#334155"), padding=12
         )
 
+    # --- MANEJO DE FILTROS ---
+
     def cambiar_filtro(e):
-        filtro_activo["tipo"] = list(e.selection)[0]
-        filtro_activo["valor"] = None
-        renderizar_tareas()
+        # Corrección: Usamos e.control.selected para evitar el AttributeError
+        if e.control.selected:
+            filtro_activo["tipo"] = list(e.control.selected)[0]
+            filtro_activo["valor"] = None
+            renderizar_tareas()
 
     def renderizar_tareas():
         tareas_a_mostrar = state["entregas"]
@@ -165,7 +170,7 @@ def main(page: ft.Page):
             txt_titulo_lista.value = "Próximas (48h)"
             tareas_a_mostrar = [t for t in state["entregas"] if 0 <= obtener_tiempo_restante(t["fecha"])[3] <= 172800]
         elif filtro_activo["tipo"] == "materia":
-            txt_titulo_lista.value = f"Materia: {filtro_activo['valor']}"
+            txt_titulo_lista.value = f"Pendientes de: {filtro_activo['valor']}"
             tareas_a_mostrar = [t for t in state["entregas"] if t["materia"] == filtro_activo["valor"]]
         else:
             txt_titulo_lista.value = "Pendientes Críticos"
@@ -175,7 +180,7 @@ def main(page: ft.Page):
         lista_tareas_ui.controls = [crear_card_tarea(ent) for ent in ordenadas]
         
         if not tareas_a_mostrar:
-            lista_tareas_ui.controls = [ft.Container(ft.Text("Sin tareas", italic=True, color="#64748b"), padding=20)]
+            lista_tareas_ui.controls = [ft.Container(ft.Text("Sin tareas pendientes", italic=True, color="#64748b"), padding=20)]
         
         actualizar_dashboard()
         page.update()
@@ -192,6 +197,14 @@ def main(page: ft.Page):
 
     txt_nueva_mat = ft.TextField(label="Nueva Materia", expand=True, border_radius=10)
     dd_materia = ft.Dropdown(label="Asignatura", expand=True, border_radius=10)
+    
+    # Botón de filtro por asignatura seleccionada
+    btn_filtro_rapido = ft.IconButton(
+        icon=ft.Icons.FILTER_ALT_OUTLINED, 
+        icon_color="#3b82f6", 
+        on_click=lambda _: filtrar_por_materia(dd_materia.value) if dd_materia.value else None
+    )
+
     dd_prio = ft.Dropdown(label="Prioridad", width=110, border_radius=10, options=[ft.dropdown.Option(x) for x in ["Crítica", "Media", "Baja"]], value="Media")
     txt_act = ft.TextField(label="Descripción", border_radius=10)
     txt_fec = ft.TextField(label="Fecha (DD/MM HH:MM)", border_radius=10, expand=True)
@@ -217,7 +230,6 @@ def main(page: ft.Page):
 
     def abrir_gestion(e):
         def borrar(m_nombre):
-            # Borrar materia en Supabase (Se encarga de borrar tareas por CASCADE si lo pusiste en SQL)
             supabase.table("materias").delete().eq("nombre", m_nombre).execute()
             guardar_y_refrescar()
             dlg.open = False
@@ -232,7 +244,7 @@ def main(page: ft.Page):
         dlg.open = True
         page.update()
 
-    # --- ARMADO DE PÁGINA (ESTRUCTURA IDÉNTICA) ---
+    # --- ENSAMBLADO FINAL ---
     page.add(
         ft.Row([
             ft.CircleAvatar(content=ft.Text("JA"), bgcolor="#f59e0b", color="black"),
@@ -255,14 +267,15 @@ def main(page: ft.Page):
                 )
             )
         ]),
-        ft.Row([dd_materia, dd_prio]),
+        ft.Row([dd_materia, btn_filtro_rapido, dd_prio]),
         txt_act,
         ft.Row([txt_fec, btn_registrar]),
         ft.Divider(height=20, color="#334155"),
-        ft.Row([txt_titulo_lista, ft.Text(f"{len(state['entregas'])} total", size=12, color="#64748b")]),
+        ft.Row([txt_titulo_lista, ft.Text(f"{len(state['entregas'])} pendientes", size=12, color="#64748b")]),
         lista_tareas_ui
     )
     
+    # Carga inicial
     cargar_datos_db()
 
 if __name__ == "__main__":
