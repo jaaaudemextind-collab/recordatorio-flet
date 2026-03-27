@@ -196,7 +196,7 @@ def main(page: ft.Page):
     )
 
     txt_nueva_mat = ft.TextField(label="Nueva Materia", expand=True, border_radius=10)
-    dd_materia = ft.Dropdown(label="Asignatura", expand=True, border_radius=10)
+    dd_materia = ft.Dropdown(label="Asignatura", expand=True, border_radius=10, text_size=12)
     
     # Botón de filtro por asignatura seleccionada
     btn_filtro_rapido = ft.IconButton(
